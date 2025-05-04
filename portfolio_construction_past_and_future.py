@@ -29,8 +29,8 @@ pc = portfolio_construction.portfolio_construction(portfolio_symbols)
 save_files_folder = r'C:\Users\Walter\Desktop\Review/'
 asset_weights = pd.read_csv(r'C:\Users\Walter\Desktop\Review/mean_variance_portfolio.csv', index_col=0).T
 price = pd.read_csv(r'C:\Users\Walter\Desktop\portfolio_construction/etf_prices.csv', index_col=0)
+price.index =[x.split(' ')[0] for x in price.index]
 asset_returns = price.pct_change()
-asset_returns.index = [x.split(' ')[0] for x in asset_returns.index]
 
 etf_types_filter = ['Technology', 'Japan Stock', 'Miscellaneous Region',
        'Large Growth', 'Large Blend','Mid-Cap Blend',
@@ -65,28 +65,48 @@ def asset_filter(etf_info, etf_types_filter, minimum_aum, expensive_ratio_filter
     return final_assets
 
 
-def portfolio_analysis(asset_weights, asset_returns, backtest_delay=1):
+def portfolio_analysis(asset_weights, price, asset_returns, backtest_delay=1):
+    min_asset_weight = 1e-6
     # Ex-ante risk
+    # variance covariance matrix
+    portfolio_ex_ante_risk = []
+    for each_date in asset_weights.index:
+        current_date_pos = list(price.index).index(each_date)
+        beginning_pos = current_date_pos+1-252*3
+        prices_period = price.iloc[beginning_pos:current_date_pos+1]
+        portfolio_period = asset_weights.loc[each_date].to_frame().fillna(0.0)
+        asset_name = portfolio_period.index
+        var_cov_matrix = pc.use_statistical_risk_model(asset_name=asset_name,
+                                                       read_price_from_file=False,
+                                                       use_price_input=True,
+                                                       price_input=prices_period,
+                                                       price_url=None)
+        ex_ante_risk_per_period = np.dot(np.dot(portfolio_period.T, var_cov_matrix), portfolio_period) ** 0.5
+        portfolio_ex_ante_risk = portfolio_ex_ante_risk + [ex_ante_risk_per_period[0][0]]
+    portfolio_ex_ante_risk = pd.DataFrame(portfolio_ex_ante_risk, index=asset_weights.index, columns =['Ex-Ante Risk'])
 
     # Returns/performance
     common_assets = asset_weights.columns.intersection(asset_returns.columns)
     common_dates = asset_weights.index.intersection(asset_returns.index)
     asset_weights = asset_weights[common_assets].loc[common_dates]
     asset_returns = asset_returns[common_assets].loc[common_dates]
-
-
     portfolio_performance = ((asset_weights.shift(1+backtest_delay))*asset_returns).sum(axis=1)
     cumulative_returns = 1+portfolio_performance.cumsum()
     annualized_returns= portfolio_performance.mean()*252
 
 
-    # Max-drawdown
     # Sharpe Ratio - 1year
     rolling_risk = portfolio_performance.rolling(window=252).std()*252**0.5
     sharpe_ratio = annualized_returns/rolling_risk
 
     # Holdings
-    # Time (may not useful)
+    holdings = pd.DataFrame()
+    for each_date in asset_weights.index:
+        temporary_holdings = asset_weights.loc[each_date]
+        temporary_holdings = temporary_holdings[temporary_holdings>=min_asset_weight].to_frame()
+        holdings = holdings.join(temporary_holdings, how='outer')
+    holdings = holdings.T
+    holdings = holdings.fillna(0.0)
     return
 
 
@@ -215,6 +235,7 @@ def mean_variance_portfolio_with_limit_risk(pc):
 
     # Working on Covariance
     # 2020-03-06
+    iteration_per_period = []
     for i in range(number_of_days_to_estimate, len(prices)):
         # i=792
         # i=799
@@ -270,7 +291,6 @@ def mean_variance_portfolio_with_limit_risk(pc):
             # The idea of adjustment is similar to Gradient descent, where we calculate the change of risk vs. lambda
             # Since lambda is not a part of the risk calculation (or variance in mean-variance framework), we use the
             # first principle: change of risk/change of lambda.
-            print (abs(risk_target**2-ex_ante_variance))
             if abs(risk_target**2-ex_ante_variance) <= tolerance_level:
                 # No need to do anything. it is satisfied
                 break
@@ -285,7 +305,6 @@ def mean_variance_portfolio_with_limit_risk(pc):
                     else:
                         lambda_value = lambda_value - lambda_value_step
                     iteration = iteration + 1
-                    print(iteration)
                 else:
                     # so if iteration >=1, it means that we can use gradient descent
                     current_ex_ante_variance=optimization_variance_figure[iteration]
@@ -308,12 +327,11 @@ def mean_variance_portfolio_with_limit_risk(pc):
                     lambda_value = lambda_value + lambda_value_step
                     lambda_values_list = lambda_values_list+[lambda_value]
                     iteration = iteration + 1
-                    print(lambda_values_list)
-                    print(optimization_variance_figure)
         portfolio_weights_all_periods = portfolio_weights_all_periods.join(weights, how='outer')
-
+        iteration_per_period = iteration_per_period + [iteration+1]
     portfolio_weights_all_periods.to_csv(rf'{save_files_folder}/mean_variance_portfolio_with_limit_risk.csv')
-    return portfolio_weights_all_periods
+    iteration_per_period = pd.DataFrame(iteration_per_period, index=portfolio_weights_all_periods.index, columns=['Iteration Per Period'])
+    return portfolio_weights_all_periods, iteration_per_period
 
 
 
@@ -409,7 +427,6 @@ def mean_variance_portfolio_different_expectation_scales_with_limit_risk(pc):
                     else:
                         lambda_value = lambda_value - lambda_value_step
                     iteration = iteration + 1
-                    print(iteration)
                 else:
                     # so if iteration >=1, it means that we can use gradient descent
                     current_ex_ante_variance = optimization_variance_figure[iteration]
@@ -432,8 +449,7 @@ def mean_variance_portfolio_different_expectation_scales_with_limit_risk(pc):
                     lambda_value = lambda_value + lambda_value_step
                     lambda_values_list = lambda_values_list + [lambda_value]
                     iteration = iteration + 1
-                    print(lambda_values_list)
-                    print(optimization_variance_figure)
+                print(iteration)
         portfolio_weights_all_periods = portfolio_weights_all_periods.join(weights, how='outer')
 
     portfolio_weights_all_periods.to_csv(rf'{save_files_folder}/mean_variance_portfolio_with_limit_risk.csv')
@@ -454,6 +470,7 @@ def max_return_with_risk_target(pc):
     prices.index = [x.split(' ')[0] for x in prices.index]
     portfolio_weights_all_periods = pd.DataFrame()
     simple_signal = prices.pct_change().rolling(window=252).mean()*252
+    risk_target=0.1
 
     # Working on Covariance
     for i in range(number_of_days_to_estimate, len(prices)):
@@ -707,10 +724,13 @@ def equal_weight(pc):
 # portfolio_weights_all_periods= mean_variance_portfolio(pc)
 
 # Example X - How to use Mean-Variance to Do a Limit Risk Constraint
-portfolio_weights_all_periods= mean_variance_portfolio_with_limit_risk(pc)
+# portfolio_weights_all_periods= mean_variance_portfolio_with_limit_risk(pc)
+
+# Example X - How to use Mean-Variance to Do a Limit Risk Constraint, but expectation is in different scale
+# portfolio_weights_all_periods = mean_variance_portfolio_different_expectation_scales_with_limit_risk(pc)
 
 # max_returns_with_risk_target
-# portfolio_weights_all_periods= max_return_with_risk_target(pc)
+portfolio_weights_all_periods= max_return_with_risk_target(pc)
 
 # Equal Weight
 # Nothing to examine
