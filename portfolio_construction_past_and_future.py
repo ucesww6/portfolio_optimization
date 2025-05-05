@@ -21,13 +21,15 @@ import cvxpy as cvx
 import portfolio_construction
 import risk_contribution
 import portfolio_analytics
+import warnings
+warnings.filterwarnings("ignore")
 
 data = pd.read_csv(r'C:\Users\Walter\Desktop\portfolio_construction/etf_sector_info.csv', index_col=0)
 portfolio_symbols = data['symbol'].to_list()
 category = data[['symbol', 'category']].set_index('symbol')
 pc = portfolio_construction.portfolio_construction(portfolio_symbols)
 save_files_folder = r'C:\Users\Walter\Desktop\Review/'
-asset_weights = pd.read_csv(r'C:\Users\Walter\Desktop\Review/mean_variance_portfolio.csv', index_col=0).T
+asset_weights = pd.read_csv(r'C:\Users\Walter\Desktop\Review/max_return_with_risk_target.csv', index_col=0).T
 price = pd.read_csv(r'C:\Users\Walter\Desktop\portfolio_construction/etf_prices.csv', index_col=0)
 price.index =[x.split(' ')[0] for x in price.index]
 asset_returns = price.pct_change()
@@ -235,10 +237,14 @@ def mean_variance_portfolio_with_limit_risk(pc):
 
     # Working on Covariance
     # 2020-03-06
+    # Working on 2022-05-06 Date
     iteration_per_period = []
+    lambda_and_risk_per_period = {}
+    final_lambda_value = []
     for i in range(number_of_days_to_estimate, len(prices)):
         # i=792
         # i=799
+        # i=900
         prices_period = prices.iloc[i-number_of_days_to_estimate:i].ffill()
         print ('Working on %s Date'%(prices_period.index[-1]))
         asset_name = list(prices_period.columns)
@@ -258,7 +264,9 @@ def mean_variance_portfolio_with_limit_risk(pc):
         tolerance_level = 10**-6
         max_iteration = 100 # maximum iteration for lambda_value
         iteration=0
+        risk_target=0.1
         # estimate lambda_value
+
         equal_weight_portfolio_returns = simple_signal_period.mean()
         equal_weights = pd.DataFrame([1/len(simple_signal)]*len(simple_signal_period))
         equal_weights.index = simple_signal_period.index
@@ -266,11 +274,10 @@ def mean_variance_portfolio_with_limit_risk(pc):
 
         lambda_value=abs(equal_weight_portfolio_returns)/equal_weight_portfolio_risk #initial guess
         initial_lambda_value = lambda_value.copy()
-        max_lambda_step = initial_lambda_value
+        max_lambda_step = initial_lambda_value*10
 
         optimization_variance_figure = []
-        lambda_values_list = [lambda_value]
-        risk_target=0.1
+        lambda_values_list = [initial_lambda_value]
 
         while iteration<= max_iteration:
             params = {'01_mean_variance': {
@@ -325,12 +332,23 @@ def mean_variance_portfolio_with_limit_risk(pc):
                             # If value is greater
                             lambda_value_step = np.sign(lambda_value_step)*max_lambda_step
                     lambda_value = lambda_value + lambda_value_step
-                    lambda_values_list = lambda_values_list+[lambda_value]
                     iteration = iteration + 1
+                lambda_values_list = lambda_values_list + [lambda_value]
+        lambda_values_list = pd.DataFrame(lambda_values_list, columns = ['lambda'])
+        optimization_risk_figure = pd.DataFrame(optimization_variance_figure, columns = ['Risk'])**0.5
+        lambda_and_risk = lambda_values_list.join(optimization_risk_figure)
+        lambda_and_risk_per_period[simple_signal_period.name] = lambda_and_risk
         portfolio_weights_all_periods = portfolio_weights_all_periods.join(weights, how='outer')
         iteration_per_period = iteration_per_period + [iteration+1]
+        final_lambda_value = final_lambda_value + [lambda_value]
+
     portfolio_weights_all_periods.to_csv(rf'{save_files_folder}/mean_variance_portfolio_with_limit_risk.csv')
     iteration_per_period = pd.DataFrame(iteration_per_period, index=portfolio_weights_all_periods.index, columns=['Iteration Per Period'])
+    final_lambda_value = pd.DataFrame(final_lambda_value, columns = ['Final lambda Value'], index=portfolio_weights_all_periods.index)
+    import pickle
+    with open('gradient_analysis.pkl', 'wb') as f:
+        pickle.dump(lambda_and_risk_per_period, f)
+
     return portfolio_weights_all_periods, iteration_per_period
 
 
@@ -724,13 +742,13 @@ def equal_weight(pc):
 # portfolio_weights_all_periods= mean_variance_portfolio(pc)
 
 # Example X - How to use Mean-Variance to Do a Limit Risk Constraint
-# portfolio_weights_all_periods= mean_variance_portfolio_with_limit_risk(pc)
+portfolio_weights_all_periods= mean_variance_portfolio_with_limit_risk(pc)
 
 # Example X - How to use Mean-Variance to Do a Limit Risk Constraint, but expectation is in different scale
 # portfolio_weights_all_periods = mean_variance_portfolio_different_expectation_scales_with_limit_risk(pc)
 
 # max_returns_with_risk_target
-portfolio_weights_all_periods= max_return_with_risk_target(pc)
+# portfolio_weights_all_periods= max_return_with_risk_target(pc)
 
 # Equal Weight
 # Nothing to examine
