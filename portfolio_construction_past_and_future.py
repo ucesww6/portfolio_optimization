@@ -236,7 +236,7 @@ def mean_variance_portfolio_with_limit_risk(pc):
     simple_signal = prices.pct_change().rolling(window=252).mean()*252
 
     # Working on Covariance
-    # 2020-03-06
+    # 2020-03-25
     # Working on 2022-05-06 Date
     iteration_per_period = []
     lambda_and_risk_per_period = {}
@@ -245,6 +245,7 @@ def mean_variance_portfolio_with_limit_risk(pc):
         # i=792
         # i=799
         # i=900
+        # i=812
         prices_period = prices.iloc[i-number_of_days_to_estimate:i].ffill()
         print ('Working on %s Date'%(prices_period.index[-1]))
         asset_name = list(prices_period.columns)
@@ -274,7 +275,7 @@ def mean_variance_portfolio_with_limit_risk(pc):
 
         lambda_value=abs(equal_weight_portfolio_returns)/equal_weight_portfolio_risk #initial guess
         initial_lambda_value = lambda_value.copy()
-        max_lambda_step = initial_lambda_value*10
+        max_lambda_step = initial_lambda_value
 
         optimization_variance_figure = []
         lambda_values_list = [initial_lambda_value]
@@ -304,7 +305,7 @@ def mean_variance_portfolio_with_limit_risk(pc):
             else:
                 if iteration ==0:
                     # if first iteration, we change lambda only tiny to find the first derivative
-                    lambda_value_step = lambda_value/10 # 10%, just repeat
+                    lambda_value_step = lambda_value/10
                     # lambda_value_step = -(risk_target ** 2 - ex_ante_variance) * lambda_value / ex_ante_variance
                     current_ex_ante_variance = optimization_variance_figure[iteration]
                     if current_ex_ante_variance > risk_target**2:
@@ -322,13 +323,13 @@ def mean_variance_portfolio_with_limit_risk(pc):
                     # Then it is an issue. We use tolerance
                     if abs(current_ex_ante_variance-previous_ex_ante_variance) < tolerance_level:
                         # The Gap is too small and it leads to issues and it does not lead to any changes to the optimization
-                        lambda_value_step = max_lambda_step
+                        lambda_value_step = max_lambda_step*iteration
                     else:
                         gap = risk_target**2-current_ex_ante_variance
                         lambda_value_step = gap/gradient
                         # Issue with this approach is that lambda_value_step can be very large and that would lead to numerical issues
                         # Therefore we introduce a limit and it is equal to the initial value of the lambda
-                        if abs(lambda_value_step) > abs(max_lambda_step) :
+                        if abs(lambda_value_step) > abs(max_lambda_step*iteration) :
                             # If value is greater
                             lambda_value_step = np.sign(lambda_value_step)*max_lambda_step
                     lambda_value = lambda_value + lambda_value_step
@@ -345,6 +346,8 @@ def mean_variance_portfolio_with_limit_risk(pc):
     portfolio_weights_all_periods.to_csv(rf'{save_files_folder}/mean_variance_portfolio_with_limit_risk.csv')
     iteration_per_period = pd.DataFrame(iteration_per_period, index=portfolio_weights_all_periods.index, columns=['Iteration Per Period'])
     final_lambda_value = pd.DataFrame(final_lambda_value, columns = ['Final lambda Value'], index=portfolio_weights_all_periods.index)
+    iteration_per_period.to_csv(rf'{save_files_folder}/iteration_per_period.csv')
+    final_lambda_value.to_csv(rf'{save_files_folder}/final_lambda_value.csv')
     import pickle
     with open('gradient_analysis.pkl', 'wb') as f:
         pickle.dump(lambda_and_risk_per_period, f)
