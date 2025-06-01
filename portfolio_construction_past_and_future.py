@@ -904,6 +904,66 @@ def mean_variance_portfolio_with_output_being_equal_weight(pc):
         problem = cp.Problem(objective, constraints)
         problem.solve()
 
+
+def admm_max_diverficiation_ratio():
+    import numpy as np
+    import cvxpy as cp
+    import pandas as pd
+
+    # Problem data
+    np.random.seed(42)
+    n = 10
+    mu = np.random.uniform(0.05, 0.15, size=n)
+    Sigma = np.random.randn(n, n)
+    Sigma = Sigma.T @ Sigma + 1e-3 * np.eye(n)  # Make positive definite
+
+    # ADMM parameters
+    rho = 1.0
+    max_iter = 200
+    tol = 1e-5
+
+    # Initialize variables
+    w = np.ones(n) / n
+    h = np.copy(w)
+    u = np.zeros(n)
+
+    # History tracking
+    history = []
+
+    for k in range(max_iter):
+        # w-update
+        w_var = cp.Variable(n)
+        obj = cp.Minimize(-mu @ w_var + (rho / 2) * cp.sum_squares(w_var - h + u))
+        constraints = [cp.sum(w_var) == 1, w_var >= 0]
+        prob = cp.Problem(obj, constraints)
+        prob.solve()
+        w_new = w_var.value
+
+        # h-update (closed form)
+        A = Sigma + (rho / 2) * np.eye(n)
+        b = (rho / 2) * (w_new + u)
+        h_new = np.linalg.solve(A, b)
+
+        # u-update
+        u += w_new - h_new
+
+        # Stats
+        port_return = mu @ w_new
+        port_risk = np.sqrt(w_new.T @ Sigma @ w_new)
+        sharpe = port_return / port_risk
+        residual = np.linalg.norm(w_new - h_new)
+
+        history.append((k, sharpe, port_return, port_risk, residual))
+
+        if residual < tol:
+            break
+
+    # Convert history to DataFrame
+    df = pd.DataFrame(history, columns=["iteration", "sharpe", "return", "risk", "primal_residual"])
+    print(df.tail())
+
+
+
 # Example 1 - Equal Weight
 # portfolio_weights_all_periods = equal_weight(pc)
 
